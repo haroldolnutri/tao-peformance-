@@ -181,8 +181,15 @@ function toast(msg) {
 function behavior() {
   /* Menu móvel */
   const btn = $("#menuBtn"), nav = $("#nav");
+  const mobileMenu = matchMedia("(max-width: 900px)");
+  const syncMenuAccess = () => {
+    nav.inert = mobileMenu.matches && !nav.classList.contains("open");
+  };
+  mobileMenu.addEventListener("change", syncMenuAccess);
+  syncMenuAccess();
   const setMenu = (open) => {
     nav.classList.toggle("open", open);
+    syncMenuAccess();
     btn.setAttribute("aria-expanded", String(open));
     btn.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
     btn.innerHTML = ic(open ? "close" : "menu");
@@ -253,17 +260,50 @@ function behavior() {
     }
   }));
 
-  /* Revelar ao rolar: o estado em repouso é visível; só o que está abaixo da dobra anima */
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (!reduce && "IntersectionObserver" in window) {
-    const els = $$(".rv").filter((el) => el.getBoundingClientRect().top > innerHeight * 0.92);
-    els.forEach((el) => el.classList.add("pre"));
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.remove("pre"); io.unobserve(en.target); } });
-    }, { threshold: 0.12 });
-    els.forEach((el) => io.observe(el));
-    setTimeout(() => els.forEach((el) => el.classList.remove("pre")), 4000);
-  }
+  /* Entradas progressivas: conteúdo permanece acessível sem animações. */
+  const motion = matchMedia("(prefers-reduced-motion: reduce)");
+  const animations = new Set();
+  const reveal = (el, delay = 0) => {
+    if (motion.matches || !el.animate) return;
+    const animation = el.animate([
+      { opacity: 0, translate: "0 24px" },
+      { opacity: 1, translate: "0 0" }
+    ], { duration: 650, delay, easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" });
+    animations.add(animation);
+    animation.finished.then(() => animations.delete(animation), () => animations.delete(animation));
+  };
+  $$(".pillars, .plans, .bento, .ftr .grid").forEach(group => [...group.children].forEach((el, i) => {
+    el.dataset.motionDelay = String((i % 3) * 85);
+  }));
+  $$(".hero-copy > *").forEach((el, i) => reveal(el, i * 75));
+  const stage = $(".stage");
+  if (stage) reveal(stage, 160);
+  const targets = [...new Set([...$$(".rv"), ...$$(".ftr .grid > *")])];
+  let observer;
+  if ("IntersectionObserver" in window) {
+    observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        reveal(entry.target, Number(entry.target.dataset.motionDelay || 0));
+        entry.target.classList.add("motion-seen");
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.08 });
+    targets.forEach(el => observer.observe(el));
+  } else targets.forEach(el => el.classList.add("motion-seen"));
+  document.addEventListener("focusin", e => {
+    animations.forEach(animation => {
+      const target = animation.effect && animation.effect.target;
+      if (target && target.contains(e.target)) animation.cancel();
+    });
+  });
+  motion.addEventListener("change", () => {
+    if (!motion.matches) return;
+    animations.forEach(animation => animation.cancel());
+    if (observer) observer.disconnect();
+    targets.forEach(el => el.classList.add("motion-seen"));
+  });
+
 }
 
 render();
